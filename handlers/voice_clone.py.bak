@@ -1,0 +1,490 @@
+"""
+Handler для клонирования голоса через XTTS-v2.
+Позволяет загружать образцы голосов, клонировать их и синтезировать речь.
+"""
+import os
+import tempfile
+from pathlib import Path
+
+from aiogram import Router, F
+from aiogram.types import Message, CallbackQuery, FSInputFile
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import StatesGroup, State
+
+from utils.keyboards import (
+    BTN_BACK, BTN_VOICE_CLONE,
+    voice_clone_main_kb, cloned_voices_list_kb,
+    cloned_voices_inline_kb, main_kb
+)
+from db.database import (
+    cloned_voices_list, cloned_voice_add, cloned_voice_get,
+    cloned_voice_delete, cloned_voice_get_by_id, cloned_voice_delete_by_id
+)
+from utils.xtts import (
+    clone_voice_from_sample, synthesize_with_cloned_voice,
+    get_voice_sample_path, delete_voice_files, delete_voice_elevenlabs
+)
+
+router = Router()
+
+
+class VoiceCloneFSM(StatesGroup):
+    """FSM состояния для клонирования голоса"""
+    main_menu = State()           # Главное меню клонирования
+    add_waiting_file = State()    # Ожидание файла с голосом
+    add_waiting_name = State()    # Ожидание названия голоса
+    add_waiting_lang = State()    # Ожидание выбора языка
+    synthesize_select_voice = State()  # Выбор голоса для синтеза
+    synthesize_waiting_text = State()  # Ожидание текста для синтеза
+    list_voices = State()         # Просмотр списка голосов
+
+
+# ===== ВХОД В МЕНЮ КЛОНИРОВАНИЯ =====
+
+@router.message(F.text == BTN_VOICE_CLONE)
+async def voice_clone_menu(message: Message, state: FSMContext):
+    """Вход в меню клонирования голоса"""
+    await state.set_state(VoiceCloneFSM.main_menu)
+    await message.answer(
+        "🎤 <b>Клонирование голоса</b>\n\n"
+        "Здесь вы можете:\n"
+        "• Добавить новый голос из аудио/видео файла\n"
+        "• Озвучить текст клонированным голосом\n"
+        "• Управлять сохраненными голосами",
+        reply_markup=voice_clone_main_kb()
+    )
+
+
+# ===== НАЗАД =====
+
+@router.message(VoiceCloneFSM.main_menu, F.text == BTN_BACK)
+async def back_to_main(message: Message, state: FSMContext):
+    """Возврат в главное меню"""
+    await state.clear()
+    await message.answer("Главное меню", reply_markup=main_kb())
+
+
+@router.message(VoiceCloneFSM.add_waiting_file, F.text == BTN_BACK)
+@router.message(VoiceCloneFSM.add_waiting_name, F.text == BTN_BACK)
+@router.message(VoiceCloneFSM.add_waiting_lang, F.text == BTN_BACK)
+@router.message(VoiceCloneFSM.synthesize_select_voice, F.text == BTN_BACK)
+@router.message(VoiceCloneFSM.synthesize_waiting_text, F.text == BTN_BACK)
+@router.message(VoiceCloneFSM.list_voices, F.text == BTN_BACK)
+async def back_to_clone_menu(message: Message, state: FSMContext):
+    """Возврат в меню клонирования"""
+    await state.set_state(VoiceCloneFSM.main_menu)
+    await state.update_data(temp_file=None, voice_name=None, voice_lang=None)
+    await message.answer(
+        "🎤 <b>Клонирование голоса</b>",
+        reply_markup=voice_clone_main_kb()
+    )
+
+
+# ===== ДОБАВЛЕНИЕ ГОЛОСА =====
+
+@router.message(VoiceCloneFSM.main_menu, F.text == "➕ Добавить голос")
+async def add_voice_start(message: Message, state: FSMContext):
+    """Начало добавления голоса"""
+    await state.set_state(VoiceCloneFSM.add_waiting_file)
+    await message.answer(
+        "📁 <b>Загрузка образца голоса</b>\n\n"
+        "Отправьте аудио или видео файл с образцом голоса.\n\n"
+        "<b>🎯 Для ЛУЧШЕГО качества клонирования:</b>\n"
+        "• ⏱ <b>Длительность: 15-60 секунд</b> (чем больше, тем лучше)\n"
+        "• 🎙 <b>Чистая речь</b> без музыки, шума, эха\n"
+        "• 🗣 <b>Естественная интонация</b> (как в разговоре)\n"
+        "• 📢 <b>Громкая и четкая</b> дикция\n"
+        "• 🚫 <b>Без пауз</b> длиннее 1-2 секунд\n"
+        "• 🎭 <b>Разнообразие</b> - разные предложения, эмоции\n\n"
+        "Поддерживаемые форматы:\n"
+        "• Видео: MP4, AVI, MKV, MOV, WebM\n"
+        "• Аудио: MP3, WAV, OGG, FLAC, M4A\n\n"
+        "⚠️ <i>Качество образца = качество клонирования!</i>"
+    )
+
+
+@router.message(VoiceCloneFSM.add_waiting_file, F.video | F.audio | F.voice | F.document)
+async def add_voice_receive_file(message: Message, state: FSMContext):
+    """Получение файла с голосом"""
+    # Определяем тип файла
+    if message.video:
+        file = message.video
+        ext = ".mp4"
+    elif message.audio:
+        file = message.audio
+        ext = ".mp3"
+    elif message.voice:
+        file = message.voice
+        ext = ".ogg"
+    elif message.document:
+        file = message.document
+        # Получаем расширение из имени файла
+        if file.file_name:
+            ext = Path(file.file_name).suffix.lower()
+        else:
+            ext = ".mp4"
+    else:
+        await message.answer("❌ Не удалось определить тип файла. Попробуйте снова.")
+        return
+
+    # Проверяем расширение
+    allowed_ext = [".mp4", ".avi", ".mkv", ".mov", ".webm", ".mp3", ".wav", ".ogg", ".flac", ".m4a"]
+    if ext not in allowed_ext:
+        await message.answer(
+            f"❌ Формат {ext} не поддерживается.\n"
+            f"Поддерживаемые форматы: {', '.join(allowed_ext)}"
+        )
+        return
+
+    # Скачиваем файл
+    await message.answer("⏳ Загружаю файл...")
+
+    # Создаем временную директорию
+    temp_dir = Path(tempfile.gettempdir()) / "voice_clone"
+    temp_dir.mkdir(exist_ok=True)
+
+    temp_path = temp_dir / f"sample_{message.from_user.id}{ext}"
+
+    try:
+        await message.bot.download(file, destination=temp_path)
+    except Exception as e:
+        await message.answer(f"❌ Ошибка загрузки: {e}")
+        return
+
+    # Сохраняем путь в FSM
+    await state.update_data(temp_file=str(temp_path))
+    await state.set_state(VoiceCloneFSM.add_waiting_name)
+
+    await message.answer(
+        "✅ Файл загружен!\n\n"
+        "Теперь введите название для этого голоса.\n"
+        "Например: <i>Александр</i>, <i>Narrator_EN</i>, <i>My_Voice</i>\n\n"
+        "⚠️ Используйте латинские буквы, цифры и подчеркивания"
+    )
+
+
+@router.message(VoiceCloneFSM.add_waiting_name, F.text)
+async def add_voice_set_name(message: Message, state: FSMContext):
+    """Установка названия голоса"""
+    name = message.text.strip()
+
+    # Валидация имени
+    if not name:
+        await message.answer("❌ Название не может быть пустым")
+        return
+
+    if len(name) > 50:
+        await message.answer("❌ Название слишком длинное (максимум 50 символов)")
+        return
+
+    # Проверяем допустимые символы
+    import re
+    if not re.match(r'^[\w\-]+$', name):
+        await message.answer(
+            "❌ Название содержит недопустимые символы.\n"
+            "Используйте только буквы, цифры, подчеркивания и дефисы."
+        )
+        return
+
+    # Проверяем уникальность
+    existing = await cloned_voice_get(name)
+    if existing:
+        await message.answer(
+            f"❌ Голос с названием <b>{name}</b> уже существует.\n"
+            "Выберите другое название."
+        )
+        return
+
+    await state.update_data(voice_name=name)
+    await state.set_state(VoiceCloneFSM.add_waiting_lang)
+
+    await message.answer(
+        f"✅ Название: <b>{name}</b>\n\n"
+        "Выберите основной язык голоса:\n\n"
+        "🇷🇺 <code>ru</code> - Русский\n"
+        "🇬🇧 <code>en</code> - English\n"
+        "🇪🇸 <code>es</code> - Español\n"
+        "🇩🇪 <code>de</code> - Deutsch\n"
+        "🇫🇷 <code>fr</code> - Français\n"
+        "🇮🇹 <code>it</code> - Italiano\n"
+        "🇵🇱 <code>pl</code> - Polski\n"
+        "🇨🇳 <code>zh-cn</code> - 中文\n"
+        "🇯🇵 <code>ja</code> - 日本語\n\n"
+        "Введите код языка (например: <code>ru</code> или <code>en</code>)"
+    )
+
+
+@router.message(VoiceCloneFSM.add_waiting_lang, F.text)
+async def add_voice_set_lang(message: Message, state: FSMContext):
+    """Установка языка и сохранение голоса"""
+    lang = message.text.strip().lower()
+
+    # Поддерживаемые языки ElevenLabs
+    supported_langs = [
+        "en", "ru", "es", "fr", "de", "it", "pt", "pl", "tr",
+        "nl", "cs", "ar", "zh", "ja", "ko", "hi", "id"
+    ]
+
+    if lang not in supported_langs:
+        await message.answer(
+            f"❌ Язык <code>{lang}</code> не поддерживается.\n"
+            f"Доступные языки: {', '.join(supported_langs)}"
+        )
+        return
+
+    data = await state.get_data()
+    temp_file = data.get("temp_file")
+    voice_name = data.get("voice_name")
+
+    if not temp_file or not voice_name:
+        await message.answer("❌ Ошибка: данные потеряны. Начните заново.")
+        await state.set_state(VoiceCloneFSM.main_menu)
+        return
+
+    # Обрабатываем образец голоса
+    await message.answer("⏳ Загружаю голос в ElevenLabs... Это может занять минуту.")
+
+    try:
+        # Клонируем голос через ElevenLabs API
+        voice_id = await clone_voice_from_sample(
+            sample_path=temp_file,
+            voice_name=voice_name,
+            language=lang
+        )
+
+        # Сохраняем в БД (voice_id вместо sample_path)
+        await cloned_voice_add(
+            name=voice_name,
+            sample_path=voice_id,  # Теперь это voice_id из ElevenLabs
+            language=lang,
+            created_by=message.from_user.id
+        )
+
+        # Удаляем временный файл
+        if os.path.exists(temp_file):
+            os.remove(temp_file)
+
+        await message.answer(
+            f"✅ <b>Голос успешно клонирован!</b>\n\n"
+            f"📛 Название: <b>{voice_name}</b>\n"
+            f"🌍 Язык: <b>{lang}</b>\n"
+            f"🔑 Voice ID: <code>{voice_id[:20]}...</code>\n\n"
+            f"Теперь вы можете использовать этот голос для озвучки текста.\n"
+            f"⚠️ Качество ElevenLabs значительно лучше XTTS!",
+            reply_markup=voice_clone_main_kb()
+        )
+
+        await state.set_state(VoiceCloneFSM.main_menu)
+        await state.update_data(temp_file=None, voice_name=None, voice_lang=None)
+
+    except Exception as e:
+        await message.answer(
+            f"❌ Ошибка при клонировании:\n<code>{str(e)}</code>\n\n"
+            "Проверьте:\n"
+            "• ELEVENLABS_API_KEY в .env\n"
+            "• Достаточно кредитов на аккаунте\n"
+            "• Файл не поврежден"
+        )
+        await state.set_state(VoiceCloneFSM.main_menu)
+
+
+# ===== ОЗВУЧКА ТЕКСТА =====
+
+@router.message(VoiceCloneFSM.main_menu, F.text == "🎙 Озвучить текст")
+async def synthesize_start(message: Message, state: FSMContext):
+    """Начало озвучки текста"""
+    voices = await cloned_voices_list()
+
+    if not voices:
+        await message.answer(
+            "❌ У вас пока нет сохраненных голосов.\n"
+            "Сначала добавьте голос с помощью кнопки '➕ Добавить голос'"
+        )
+        return
+
+    voice_names = [v["name"] for v in voices]
+    await state.set_state(VoiceCloneFSM.synthesize_select_voice)
+
+    await message.answer(
+        "🎙 <b>Выберите голос для озвучки:</b>",
+        reply_markup=cloned_voices_list_kb(voice_names)
+    )
+
+
+@router.message(VoiceCloneFSM.synthesize_select_voice, F.text)
+async def synthesize_select(message: Message, state: FSMContext):
+    """Выбор голоса для синтеза"""
+    if message.text == BTN_BACK:
+        return  # Обработается в back_to_clone_menu
+
+    voice_name = message.text.strip()
+    voice = await cloned_voice_get(voice_name)
+
+    if not voice:
+        await message.answer(f"❌ Голос '{voice_name}' не найден. Выберите из списка.")
+        return
+
+    await state.update_data(
+        selected_voice=voice_name,
+        voice_lang=voice.get("language", "ru")
+    )
+    await state.set_state(VoiceCloneFSM.synthesize_waiting_text)
+
+    await message.answer(
+        f"✅ Выбран голос: <b>{voice_name}</b>\n"
+        f"🌍 Язык: <b>{voice.get('language', 'ru')}</b>\n\n"
+        "Теперь введите текст, который нужно озвучить.\n\n"
+        "⚠️ Максимум: 1000 символов\n"
+        "💡 Используйте текст на языке выбранного голоса для лучшего результата"
+    )
+
+
+@router.message(VoiceCloneFSM.synthesize_waiting_text, F.text)
+async def synthesize_text(message: Message, state: FSMContext):
+    """Синтез речи с клонированным голосом"""
+    if message.text == BTN_BACK:
+        return
+
+    text = message.text.strip()
+
+    if not text:
+        await message.answer("❌ Текст не может быть пустым")
+        return
+
+    if len(text) > 5000:
+        await message.answer(
+            f"❌ Текст слишком длинный ({len(text)} символов).\n"
+            "Максимум: 5000 символов"
+        )
+        return
+
+    data = await state.get_data()
+    voice_name = data.get("selected_voice")
+
+    voice = await cloned_voice_get(voice_name)
+    if not voice:
+        await message.answer("❌ Голос не найден. Начните заново.")
+        await state.set_state(VoiceCloneFSM.main_menu)
+        return
+
+    voice_id = voice.get("sample_path")  # Теперь это voice_id
+    if not voice_id:
+        await message.answer("❌ Voice ID не найден. Переустановите голос.")
+        await state.set_state(VoiceCloneFSM.main_menu)
+        return
+
+    # Синтезируем речь
+    await message.answer("⏳ Генерирую озвучку через ElevenLabs...")
+
+    try:
+        # Создаем временный файл для результата
+        output_path = tempfile.mktemp(suffix=".mp3")
+
+        # Синтезируем через ElevenLabs
+        result_path = await synthesize_with_cloned_voice(
+            text=text,
+            voice_id=voice_id,
+            output_path=output_path,
+            stability=0.5,
+            similarity_boost=0.75
+        )
+
+        # Отправляем аудио
+        audio_file = FSInputFile(result_path)
+        await message.answer_audio(
+            audio_file,
+            caption=f"🎙 Голос: <b>{voice_name}</b>\n📝 Текст: <i>{text[:100]}{'...' if len(text) > 100 else ''}</i>"
+        )
+
+        # Удаляем временный файл
+        if os.path.exists(result_path):
+            os.remove(result_path)
+
+        await message.answer(
+            "✅ Озвучка готова!\n\n"
+            "Можете ввести новый текст или вернуться назад.",
+            reply_markup=voice_clone_main_kb()
+        )
+
+        await state.set_state(VoiceCloneFSM.main_menu)
+
+    except Exception as e:
+        await message.answer(
+            f"❌ Ошибка синтеза:\n<code>{str(e)}</code>\n\n"
+            "Проверьте баланс кредитов ElevenLabs."
+        )
+
+
+# ===== СПИСОК ГОЛОСОВ =====
+
+@router.message(VoiceCloneFSM.main_menu, F.text == "📋 Список голосов")
+async def list_voices(message: Message, state: FSMContext):
+    """Показать список голосов с возможностью удаления"""
+    voices = await cloned_voices_list()
+
+    if not voices:
+        await message.answer(
+            "📋 <b>Список голосов пуст</b>\n\n"
+            "У вас пока нет сохраненных голосов.\n"
+            "Добавьте голос с помощью кнопки '➕ Добавить голос'"
+        )
+        return
+
+    text = "📋 <b>Ваши клонированные голоса:</b>\n\n"
+    for i, v in enumerate(voices, 1):
+        name = v.get("name", "Unknown")
+        lang = v.get("language", "?")
+        created = v.get("created_at", "")
+        if created:
+            created_str = created.strftime("%d.%m.%Y")
+        else:
+            created_str = "N/A"
+        text += f"{i}. <b>{name}</b> ({lang}) - {created_str}\n"
+
+    text += "\n🗑 Нажмите на голос ниже, чтобы удалить его:"
+
+    await message.answer(text, reply_markup=cloned_voices_inline_kb(voices))
+
+
+# ===== CALLBACK: УДАЛЕНИЕ ГОЛОСА =====
+
+@router.callback_query(F.data.startswith("vclone:del:"))
+async def delete_voice_callback(callback: CallbackQuery):
+    """Удаление клонированного голоса"""
+    db_voice_id = callback.data.split(":")[2]
+
+    voice = await cloned_voice_get_by_id(db_voice_id)
+    if not voice:
+        await callback.answer("❌ Голос не найден", show_alert=True)
+        return
+
+    voice_name = voice.get("name", "Unknown")
+    elevenlabs_voice_id = voice.get("sample_path", "")  # Это voice_id из ElevenLabs
+
+    # Удаляем из ElevenLabs
+    if elevenlabs_voice_id:
+        try:
+            await delete_voice_elevenlabs(elevenlabs_voice_id)
+        except Exception:
+            pass  # Игнорируем ошибки удаления из API
+
+    # Удаляем файлы с диска
+    delete_voice_files(voice_name)
+
+    # Удаляем из БД
+    await cloned_voice_delete_by_id(db_voice_id)
+
+    await callback.answer(f"✅ Голос '{voice_name}' удален", show_alert=True)
+
+    # Обновляем список
+    voices = await cloned_voices_list()
+    if voices:
+        text = "📋 <b>Ваши клонированные голоса:</b>\n\n"
+        for i, v in enumerate(voices, 1):
+            name = v.get("name", "Unknown")
+            lang = v.get("language", "?")
+            text += f"{i}. <b>{name}</b> ({lang})\n"
+        text += "\n🗑 Нажмите на голос, чтобы удалить:"
+        await callback.message.edit_text(text, reply_markup=cloned_voices_inline_kb(voices))
+    else:
+        await callback.message.edit_text("📋 <b>Список голосов пуст</b>")

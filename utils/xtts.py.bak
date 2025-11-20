@@ -1,0 +1,280 @@
+"""
+Модуль для клонирования голоса через ElevenLabs API.
+Поддерживает загрузку аудио/видео образца и синтез речи клонированным голосом.
+"""
+import os
+import asyncio
+import aiohttp
+from pathlib import Path
+from typing import Optional
+
+# Путь для хранения образцов голосов
+VOICES_DIR = Path("assets/voices")
+VOICES_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _get_elevenlabs_key() -> str:
+    """Получает API ключ ElevenLabs из конфига"""
+    key = os.getenv("ELEVENLABS_API_KEY", "")
+    if not key:
+        raise ValueError("ELEVENLABS_API_KEY not set in .env")
+    return key
+
+
+def _get_ffmpeg_path() -> str:
+    """Получает путь к FFmpeg из конфига"""
+    from utils.config import FFMPEG_BIN
+    return FFMPEG_BIN
+
+
+async def extract_audio_from_video(video_path: str, output_path: str) -> str:
+    """
+    Извлекает аудио из видеофайла в mp3 формат (для ElevenLabs).
+    """
+    ffmpeg = _get_ffmpeg_path()
+
+    # Конвертируем в MP3 (ElevenLabs принимает mp3)
+    cmd = [
+        ffmpeg,
+        "-y",
+        "-i", video_path,
+        "-vn",
+        "-acodec", "libmp3lame",
+        "-ar", "44100",
+        "-ac", "1",
+        "-b:a", "192k",
+        output_path
+    ]
+
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
+    )
+    _, stderr = await proc.communicate()
+
+    if proc.returncode != 0:
+        raise RuntimeError(f"FFmpeg error: {stderr.decode()}")
+
+    return output_path
+
+
+async def clone_voice_elevenlabs(
+    sample_path: str,
+    voice_name: str,
+    description: str = "Cloned voice"
+) -> str:
+    """
+    Клонирует голос через ElevenLabs API.
+
+    Returns:
+        voice_id - ID созданного голоса в ElevenLabs
+    """
+    api_key = _get_elevenlabs_key()
+
+    url = "https://api.elevenlabs.io/v1/voices/add"
+
+    headers = {
+        "xi-api-key": api_key,
+    }
+
+    # Читаем файл
+    with open(sample_path, "rb") as f:
+        file_data = f.read()
+
+    # Формируем multipart запрос
+    data = aiohttp.FormData()
+    data.add_field("name", voice_name)
+    data.add_field("description", description)
+    data.add_field(
+        "files",
+        file_data,
+        filename=os.path.basename(sample_path),
+        content_type="audio/mpeg"
+    )
+
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, headers=headers, data=data) as resp:
+            if resp.status != 200:
+                error_text = await resp.text()
+                raise RuntimeError(f"ElevenLabs API error ({resp.status}): {error_text}")
+
+            result = await resp.json()
+            voice_id = result.get("voice_id")
+            if not voice_id:
+                raise RuntimeError(f"No voice_id in response: {result}")
+
+            return voice_id
+
+
+async def delete_voice_elevenlabs(voice_id: str) -> bool:
+    """
+    Удаляет голос из ElevenLabs.
+    """
+    api_key = _get_elevenlabs_key()
+
+    url = f"https://api.elevenlabs.io/v1/voices/{voice_id}"
+
+    headers = {
+        "xi-api-key": api_key,
+    }
+
+    async with aiohttp.ClientSession() as session:
+        async with session.delete(url, headers=headers) as resp:
+            return resp.status == 200
+
+
+async def synthesize_with_cloned_voice(
+    text: str,
+    voice_id: str,
+    output_path: str,
+    model_id: str = "eleven_multilingual_v2",
+    stability: float = 0.5,
+    similarity_boost: float = 0.75,
+    style: float = 0.0,
+    use_speaker_boost: bool = True
+) -> str:
+    """
+    Синтезирует речь с клонированным голосом через ElevenLabs.
+
+    Args:
+        text: Текст для озвучки
+        voice_id: ID голоса в ElevenLabs
+        output_path: Путь для сохранения
+        model_id: Модель TTS (eleven_multilingual_v2 для RU/EN)
+        stability: Стабильность (0-1, выше = стабильнее)
+        similarity_boost: Схожесть с оригиналом (0-1, выше = ближе)
+        style: Экспрессивность (0-1)
+        use_speaker_boost: Усиление характеристик голоса
+
+    Returns:
+        Путь к аудиофайлу
+    """
+    api_key = _get_elevenlabs_key()
+
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+
+    headers = {
+        "xi-api-key": api_key,
+        "Content-Type": "application/json",
+        "Accept": "audio/mpeg"
+    }
+
+    payload = {
+        "text": text,
+        "model_id": model_id,
+        "voice_settings": {
+            "stability": stability,
+            "similarity_boost": similarity_boost,
+            "style": style,
+            "use_speaker_boost": use_speaker_boost
+        }
+    }
+
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, headers=headers, json=payload) as resp:
+            if resp.status != 200:
+                error_text = await resp.text()
+                raise RuntimeError(f"ElevenLabs TTS error ({resp.status}): {error_text}")
+
+            # Сохраняем аудио
+            audio_data = await resp.read()
+            with open(output_path, "wb") as f:
+                f.write(audio_data)
+
+            return output_path
+
+
+async def clone_voice_from_sample(
+    sample_path: str,
+    voice_name: str,
+    language: str = "ru"
+) -> str:
+    """
+    Подготавливает и клонирует голос.
+
+    Returns:
+        voice_id из ElevenLabs (сохраняется в БД)
+    """
+    # Создаем директорию для голоса
+    voice_dir = VOICES_DIR / voice_name
+    voice_dir.mkdir(parents=True, exist_ok=True)
+
+    # Путь для mp3 файла
+    mp3_path = voice_dir / "sample.mp3"
+
+    # Определяем тип файла и конвертируем в mp3
+    ext = Path(sample_path).suffix.lower()
+
+    if ext in [".mp4", ".avi", ".mkv", ".mov", ".webm", ".wav", ".ogg", ".flac", ".m4a"]:
+        await extract_audio_from_video(sample_path, str(mp3_path))
+    elif ext == ".mp3":
+        # Копируем как есть
+        import shutil
+        shutil.copy(sample_path, mp3_path)
+    else:
+        raise ValueError(f"Unsupported file format: {ext}")
+
+    # Клонируем через ElevenLabs API
+    voice_id = await clone_voice_elevenlabs(
+        sample_path=str(mp3_path),
+        voice_name=voice_name,
+        description=f"Cloned voice ({language})"
+    )
+
+    # Сохраняем метаданные локально
+    meta_path = voice_dir / "meta.txt"
+    with open(meta_path, "w", encoding="utf-8") as f:
+        f.write(f"name={voice_name}\n")
+        f.write(f"language={language}\n")
+        f.write(f"voice_id={voice_id}\n")
+        f.write(f"sample_path={mp3_path}\n")
+
+    return voice_id
+
+
+def get_voice_sample_path(voice_name: str) -> Optional[str]:
+    """
+    Возвращает путь к образцу голоса по имени.
+    """
+    mp3_path = VOICES_DIR / voice_name / "sample.mp3"
+    if mp3_path.exists():
+        return str(mp3_path)
+    return None
+
+
+def delete_voice_files(voice_name: str) -> bool:
+    """
+    Удаляет файлы голоса с диска.
+    """
+    import shutil
+    voice_dir = VOICES_DIR / voice_name
+    if voice_dir.exists():
+        shutil.rmtree(voice_dir)
+        return True
+    return False
+
+
+async def get_available_languages() -> list:
+    """
+    Возвращает список доступных языков для ElevenLabs.
+    """
+    return [
+        "en",  # English
+        "ru",  # Russian
+        "es",  # Spanish
+        "fr",  # French
+        "de",  # German
+        "it",  # Italian
+        "pt",  # Portuguese
+        "pl",  # Polish
+        "tr",  # Turkish
+        "nl",  # Dutch
+        "cs",  # Czech
+        "ar",  # Arabic
+        "zh",  # Chinese
+        "ja",  # Japanese
+        "ko",  # Korean
+        "hi",  # Hindi
+        "id",  # Indonesian
+    ]

@@ -1,0 +1,32 @@
+# Telegram Bot
+aiogram>=3.7.0
+aiohttp>=3.9.0
+
+# Database
+motor>=3.3.0
+pymongo>=4.6.0
+
+# TTS - GenAIPro API only (uses aiohttp above)
+# No additional TTS dependencies needed
+edge-tts>=6.1.0
+
+# AI/ML
+openai>=1.12.0
+
+# Image Processing
+Pillow>=10.2.0
+
+# Animation (Manim) - OPTIONAL, conflicts with moviepy numpy requirements
+# Install separately if needed: pip install manim
+# manim>=0.18.0
+numpy<2.0,>=1.24.0
+
+# Video Assembly (Long videos)
+moviepy<2.0
+fal-client>=0.4.0
+
+# Configuration
+python-dotenv>=1.0.0
+
+# Utils
+aiofiles>=23.2.0

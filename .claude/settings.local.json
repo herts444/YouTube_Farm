@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install:*)",
+      "Bash(nul)",
+      "Bash(ren \"handlers\\voice_clone.py\" \"voice_clone.py.bak\")",
+      "Bash(ren \"utils\\xtts.py\" \"xtts.py.bak\")",
+      "Bash(powershell -Command:*)",
+      "Bash(python -m py_compile:*)",
+      "Bash(gh repo view:*)",
+      "Bash(gh api:*)",
+      "Bash(timeout /t 5 python main.py)",
+      "Bash(exit 0)",
+      "Bash(python:*)",
+      "Bash(pip show:*)",
+      "Bash(pip uninstall:*)",
+      "Bash(cat:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(gh repo create:*)",
+      "Bash(git checkout:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
