@@ -135,67 +135,37 @@ async def settings_voices(callback: types.CallbackQuery):
 
 @router.callback_query(F.data == "voice:add")
 async def voice_add(callback: types.CallbackQuery, state: FSMContext):
-    """Добавление нового голоса"""
+    """Добавление нового голоса по ID из GenAIPro"""
     await callback.message.edit_text(
         "🎙 <b>Добавление голоса</b>\n\n"
-        "Отправьте голосовое сообщение или аудиофайл длительностью 6-30 секунд для клонирования голоса.\n\n"
-        "Требования:\n"
-        "• Чистая запись без фонового шума\n"
-        "• Естественная речь\n"
-        "• Длительность: 6-30 секунд",
+        "Введите Voice ID из GenAIPro (ElevenLabs):\n"
+        "Например: <code>h9NSQvWZaC4NFusYsxT9</code>",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="❌ Отмена", callback_data="settings:voices")]
         ])
     )
-    await state.set_state("waiting_voice_sample")
+    await state.set_state("waiting_voice_id")
     await callback.answer()
 
 
-@router.message(F.content_type.in_(["voice", "audio"]), StateFilter("waiting_voice_sample"))
-async def voice_sample_received(message: types.Message, state: FSMContext):
-    """Получен образец голоса"""
-    await state.clear()
+@router.message(F.text, StateFilter("waiting_voice_id"))
+async def voice_id_received(message: types.Message, state: FSMContext):
+    """Получен Voice ID - запрашиваем название"""
+    voice_id = message.text.strip()
 
-    msg = await message.answer("⏳ Обрабатываю голосовой образец...")
+    if len(voice_id) < 5 or len(voice_id) > 50:
+        await message.answer("❌ Неверный формат Voice ID. Попробуйте еще раз:")
+        return
 
-    try:
-        # Получаем файл
-        if message.voice:
-            file_id = message.voice.file_id
-            duration = message.voice.duration
-        else:
-            file_id = message.audio.file_id
-            duration = message.audio.duration
-
-        # Проверка длительности
-        if duration < 6 or duration > 30:
-            await msg.edit_text(
-                "❌ Длительность записи должна быть от 6 до 30 секунд.\n\n"
-                f"Ваша запись: {duration} сек.",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="🔙 Назад к голосам", callback_data="settings:voices")]
-                ])
-            )
-            return
-
-        # Запрашиваем имя голоса
-        await msg.edit_text(
-            "✅ Образец получен!\n\n"
-            "Теперь введите название для этого голоса:",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="❌ Отмена", callback_data="settings:voices")]
-            ])
-        )
-        await state.set_state("waiting_voice_name")
-        await state.update_data(voice_file_id=file_id)
-
-    except Exception as e:
-        await msg.edit_text(
-            f"❌ Ошибка при обработке: {str(e)}",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🔙 Назад к голосам", callback_data="settings:voices")]
-            ])
-        )
+    await state.update_data(voice_id=voice_id)
+    await message.answer(
+        f"✅ Voice ID принят: <code>{voice_id}</code>\n\n"
+        "Теперь введите название для этого голоса:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="❌ Отмена", callback_data="settings:voices")]
+        ])
+    )
+    await state.set_state("waiting_voice_name")
 
 
 @router.message(F.text, StateFilter("waiting_voice_name"))
@@ -204,7 +174,7 @@ async def voice_name_received(message: types.Message, state: FSMContext):
     from db.database import db
 
     data = await state.get_data()
-    file_id = data.get("voice_file_id")
+    voice_id = data.get("voice_id")
     name = message.text.strip()
 
     if len(name) > 50:
@@ -218,13 +188,13 @@ async def voice_name_received(message: types.Message, state: FSMContext):
         # Сохраняем в БД
         await db().preset_voices.insert_one({
             "name": name,
-            "file_id": file_id,
+            "voice_id": voice_id,
             "lang": "ru",
             "created_at": message.date
         })
 
         await msg.edit_text(
-            f"✅ Голос <b>{name}</b> успешно добавлен!",
+            f"✅ Голос <b>{name}</b> (ID: <code>{voice_id}</code>) успешно добавлен!",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="🔙 Назад к голосам", callback_data="settings:voices")]
             ])
