@@ -9,8 +9,6 @@ services:
       - mongodb_data:/data/db
     networks:
       - youtube_farm_network
-    ports:
-      - "27017:27017"
 
   youtube_farm_bot:
     build:

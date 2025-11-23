@@ -33,7 +33,16 @@
       "Bash(temp_animations.py)",
       "Bash(del temp_animations.py 2)",
       "Bash(dir:*)",
-      "Bash(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 Beeck1337@89.116.23.236 \"uname -a && echo ''---'' && docker --version 2>&1 || echo ''Docker not installed'' && echo ''---'' && docker-compose --version 2>&1 || echo ''Docker Compose not installed''\")"
+      "Bash(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 Beeck1337@89.116.23.236 \"uname -a && echo ''---'' && docker --version 2>&1 || echo ''Docker not installed'' && echo ''---'' && docker-compose --version 2>&1 || echo ''Docker Compose not installed''\")",
+      "Bash(del deploy_temp.ps1 2)",
+      "Bash(powershell -ExecutionPolicy Bypass -File auto_deploy.ps1)",
+      "Bash(bash:*)",
+      "Bash(ssh-keygen:*)",
+      "Bash(tee:*)",
+      "Bash(gh repo edit:*)",
+      "Bash(git reset:*)",
+      "Bash(gh secret scanning bypass --help:*)",
+      "Bash(del deploy.bat deploy_server.bat deploy.sh deploy_commands.sh server_setup.sh deploy_auto.py deploy_complete.py deploy_fast.py deploy_final.py check_status.py start_bot.py setup_ssh_key.py auto_deploy.ps1 deploy_temp.ps1 deploy.exp deploy_log.txt deployment_log.txt quick_deploy.txt DEPLOY.md 2)"
     ],
     "deny": [],
     "ask": []
