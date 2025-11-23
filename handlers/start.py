@@ -1,5 +1,5 @@
 from aiogram import Router, types, F
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, StateFilter
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 
@@ -131,6 +131,111 @@ async def settings_voices(callback: types.CallbackQuery):
         reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
     )
     await callback.answer()
+
+
+@router.callback_query(F.data == "voice:add")
+async def voice_add(callback: types.CallbackQuery, state: FSMContext):
+    """Добавление нового голоса"""
+    await callback.message.edit_text(
+        "🎙 <b>Добавление голоса</b>\n\n"
+        "Отправьте голосовое сообщение или аудиофайл длительностью 6-30 секунд для клонирования голоса.\n\n"
+        "Требования:\n"
+        "• Чистая запись без фонового шума\n"
+        "• Естественная речь\n"
+        "• Длительность: 6-30 секунд",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="❌ Отмена", callback_data="settings:voices")]
+        ])
+    )
+    await state.set_state("waiting_voice_sample")
+    await callback.answer()
+
+
+@router.message(F.content_type.in_(["voice", "audio"]), StateFilter("waiting_voice_sample"))
+async def voice_sample_received(message: types.Message, state: FSMContext):
+    """Получен образец голоса"""
+    await state.clear()
+
+    msg = await message.answer("⏳ Обрабатываю голосовой образец...")
+
+    try:
+        # Получаем файл
+        if message.voice:
+            file_id = message.voice.file_id
+            duration = message.voice.duration
+        else:
+            file_id = message.audio.file_id
+            duration = message.audio.duration
+
+        # Проверка длительности
+        if duration < 6 or duration > 30:
+            await msg.edit_text(
+                "❌ Длительность записи должна быть от 6 до 30 секунд.\n\n"
+                f"Ваша запись: {duration} сек.",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🔙 Назад к голосам", callback_data="settings:voices")]
+                ])
+            )
+            return
+
+        # Запрашиваем имя голоса
+        await msg.edit_text(
+            "✅ Образец получен!\n\n"
+            "Теперь введите название для этого голоса:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="❌ Отмена", callback_data="settings:voices")]
+            ])
+        )
+        await state.set_state("waiting_voice_name")
+        await state.update_data(voice_file_id=file_id)
+
+    except Exception as e:
+        await msg.edit_text(
+            f"❌ Ошибка при обработке: {str(e)}",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 Назад к голосам", callback_data="settings:voices")]
+            ])
+        )
+
+
+@router.message(F.text, StateFilter("waiting_voice_name"))
+async def voice_name_received(message: types.Message, state: FSMContext):
+    """Получено имя голоса - сохраняем"""
+    from db.database import db
+
+    data = await state.get_data()
+    file_id = data.get("voice_file_id")
+    name = message.text.strip()
+
+    if len(name) > 50:
+        await message.answer("❌ Название слишком длинное (максимум 50 символов)")
+        return
+
+    await state.clear()
+    msg = await message.answer("💾 Сохраняю голос...")
+
+    try:
+        # Сохраняем в БД
+        await db().preset_voices.insert_one({
+            "name": name,
+            "file_id": file_id,
+            "lang": "ru",
+            "created_at": message.date
+        })
+
+        await msg.edit_text(
+            f"✅ Голос <b>{name}</b> успешно добавлен!",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 Назад к голосам", callback_data="settings:voices")]
+            ])
+        )
+    except Exception as e:
+        await msg.edit_text(
+            f"❌ Ошибка при сохранении: {str(e)}",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 Назад к голосам", callback_data="settings:voices")]
+            ])
+        )
 
 
 @router.callback_query(F.data == "settings:prompts")
