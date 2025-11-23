@@ -14,29 +14,49 @@ try:
     MANIM_AVAILABLE = True
 except ImportError:
     MANIM_AVAILABLE = False
+    import random
+    import numpy as np
     print("Warning: Manim not available. Animation features will be disabled.")
 
+    # Create dummy classes when Manim is not available
+    class Scene:
+        pass
 
-class BaseAnimation:
+if MANIM_AVAILABLE:
+    _BaseAnimation = object
+else:
+    _BaseAnimation = object
+
+
+class BaseAnimation(_BaseAnimation):
     """Base class for all animations"""
 
     def __init__(self, duration: int = 10):
         self.duration = duration
-        self.colors = [RED, BLUE, GREEN, YELLOW, PURPLE, ORANGE, PINK, TEAL]
+        if MANIM_AVAILABLE:
+            self.colors = [RED, BLUE, GREEN, YELLOW, PURPLE, ORANGE, PINK, TEAL]
+        else:
+            self.colors = []
 
     def get_random_color(self):
         """Get random color"""
-        return random.choice(self.colors)
+        if MANIM_AVAILABLE:
+            return random.choice(self.colors)
+        return None
 
     def get_gradient_colors(self, count: int = 2):
         """Get gradient colors"""
-        return random.sample(self.colors, min(count, len(self.colors)))
+        if MANIM_AVAILABLE:
+            return random.sample(self.colors, min(count, len(self.colors)))
+        return []
 
 
 class OrbitEscapeBall(BaseAnimation):
     """Ball orbiting rings with periodic escapes"""
 
     def construct(self, scene: Scene):
+        if not MANIM_AVAILABLE:
+            raise ImportError("Manim is required for animations")
         # Black background with stars
         scene.camera.background_color = "#000000"
 
