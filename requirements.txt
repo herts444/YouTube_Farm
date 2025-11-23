@@ -16,9 +16,8 @@ openai>=1.12.0
 # Image Processing
 Pillow>=10.2.0
 
-# Animation (Manim) - OPTIONAL, conflicts with moviepy numpy requirements
-# Install separately if needed: pip install manim
-# manim>=0.18.0
+# Animation (Manim)
+manim>=0.18.0
 numpy<2.0,>=1.24.0
 
 # Video Assembly (Long videos)
