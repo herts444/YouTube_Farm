@@ -20,21 +20,33 @@ async def process_video_task(task) -> Dict[str, Any]:
     task_type = task.task_type
     config = task.config
 
+    print(f"[TaskWorker] Processing task {task.task_id}, type: {task_type}")
+    print(f"[TaskWorker] Config: {config}")
+
     workdir = tempfile.mkdtemp(prefix=f"{task_type}_{task.task_id}_")
+    print(f"[TaskWorker] Created workdir: {workdir}")
 
     try:
         if task_type == "cuts":
+            print(f"[TaskWorker] Starting cuts task...")
             return await _process_cuts_task(config, workdir)
         elif task_type in ("reddit", "educational", "horror", "facts", "history", "news"):
+            print(f"[TaskWorker] Starting story task...")
             return await _process_story_task(task_type, config, workdir)
         else:
             raise ValueError(f"Unknown task type: {task_type}")
+    except Exception as e:
+        print(f"[TaskWorker] ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
     finally:
         # Очистка временной директории
         try:
             shutil.rmtree(workdir, ignore_errors=True)
-        except Exception:
-            pass
+            print(f"[TaskWorker] Cleaned up workdir: {workdir}")
+        except Exception as e:
+            print(f"[TaskWorker] Failed to cleanup workdir: {e}")
 
 
 async def _process_cuts_task(config: Dict[str, Any], workdir: str) -> Dict[str, Any]:
