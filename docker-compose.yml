@@ -5,6 +5,7 @@ services:
     image: mongo:7.0
     container_name: youtube_farm_mongodb
     restart: unless-stopped
+    command: --quiet
     volumes:
       - mongodb_data:/data/db
     networks:
