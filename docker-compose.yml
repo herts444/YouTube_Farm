@@ -23,15 +23,15 @@ services:
       # Config (if needed)
       - ./.config:/root/.config
 
-    # Resource limits
+    # Resource limits (adjusted for 1-CPU server)
     deploy:
       resources:
         limits:
-          cpus: '2'
-          memory: 4G
-        reservations:
-          cpus: '1'
+          cpus: '0.8'
           memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
 
     # Logging
     logging:
