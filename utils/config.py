@@ -14,6 +14,7 @@ MONGO_DB = os.getenv("MONGO_DB", "shorts_bot")
 VEO3_API_KEY = os.getenv("VEO3_API_KEY", "")
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+GROK_API_KEY = os.getenv("GROK_API_KEY", "")
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
 ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
 
@@ -48,6 +49,10 @@ def _guess_ffprobe() -> str:
 
 FFMPEG_BIN = _guess_ffmpeg()
 FFPROBE_BIN = _guess_ffprobe()
+
+# ВАЖНО: Не импортируем pydub здесь!
+# Импорт и настройка pydub происходит в main.py ДО импорта handlers
+# Это предотвращает предупреждение "Couldn't find ffmpeg"
 
 # -------- Шрифт (Pillow) --------
 # если явно указан в .env — используем его

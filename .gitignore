@@ -1,31 +1,49 @@
 # Environment variables
 .env
+.env.local
 
 # Python cache
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.py[cod]
+*$py.class
+*.so
 .Python
+env/
+venv/
+ENV/
+.venv
 
 # Output directory
 out/
+output/
 *.mp4
 *.mp3
 *.wav
+*.png
+*.jpg
+*.jpeg
 
 # Assets directory (large video files)
-assets/
+assets/cartoons/*/
+assets/films/*/
+!assets/cartoons/.gitkeep
+!assets/films/.gitkeep
 
 # Database
 *.db
+*.sqlite
 *.sqlite3
+db/*.db
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
 
 # OS
 .DS_Store
@@ -33,7 +51,33 @@ Thumbs.db
 
 # Logs
 *.log
+logs/
 
 # Temporary files
 temp/
 tmp/
+*.tmp
+nul
+
+# Backup files
+*.bak
+*.backup
+
+# Config
+.config/
+
+# Documentation (auto-generated)
+CHANGES.md
+INLINE_MENU_GUIDE.md
+README_CHANGES.md
+TASK_QUEUE_GUIDE.md
+
+# Test files
+TEST_*.bat
+test_*.py
+*_test.py
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/

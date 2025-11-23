@@ -18,7 +18,22 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(gh repo create:*)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "Bash(git branch:*)",
+      "Bash(git push:*)",
+      "Bash(git remote:*)",
+      "Bash(timeout /t 3)",
+      "Bash(where:*)",
+      "Bash(dir /s /b ffmpeg.exe 2)",
+      "Bash(findstr:*)",
+      "Bash(timeout /t 3 python main.py)",
+      "Bash(ren:*)",
+      "Bash(timeout:*)",
+      "Bash(gh auth:*)",
+      "Bash(temp_animations.py)",
+      "Bash(del temp_animations.py 2)",
+      "Bash(dir:*)",
+      "Bash(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 Beeck1337@89.116.23.236 \"uname -a && echo ''---'' && docker --version 2>&1 || echo ''Docker not installed'' && echo ''---'' && docker-compose --version 2>&1 || echo ''Docker Compose not installed''\")"
     ],
     "deny": [],
     "ask": []

@@ -713,18 +713,108 @@ class BouncingBallRings(BaseAnimation):
 
         # Physics parameters
         fps = 60
+        total_frames = int(self.duration * fps)
         dt = 1.0 / fps
 
         GRAVITY = 18.0
         BOUNCE = 1.01
         BALL_RADIUS = 0.15
         MIN_VELOCITY = 2.0
+
+        # Rings
+        num_rings = 3
+        ring_radii = [1.5, 2.3, 3.1]
+        gap_angles = [random.uniform(0, TAU) for _ in range(num_rings)]
         gap_size = 0.45
+
+        rotation_speeds = [random.choice([-0.6, 0.6]) for _ in range(num_rings)]
+
+        # Pre-calculate physics
+        pos = np.array([0.0, 0.0, 0.0])
+        vel = np.array([random.uniform(-4, 4), 6.0, 0.0])
+
+        ball_positions = []
+        destroyed_rings = []
+        active_rings = set(range(num_rings))
+
+        for frame in range(total_frames):
+            vel[1] -= GRAVITY * dt
+            new_pos = pos + vel * dt
+
+            dist = np.sqrt(new_pos[0]**2 + new_pos[1]**2)
+
+            if dist > 0.1:
+                angle = np.arctan2(new_pos[1], new_pos[0]) % TAU
+
+                for ring_idx in list(active_rings):
+                    ring_r = ring_radii[ring_idx]
+
+                    if abs(dist - ring_r) < BALL_RADIUS + 0.1:
+                        current_gap = (gap_angles[ring_idx] + rotation_speeds[ring_idx] * frame * dt) % TAU
+                        angle_diff = min(abs(angle - current_gap), TAU - abs(angle - current_gap))
+
+                        if angle_diff < gap_size / 2:
+                            destroyed_rings.append((frame, ring_idx))
+                            active_rings.remove(ring_idx)
+                            break
+                        else:
+                            normal = np.array([new_pos[0] / dist, new_pos[1] / dist, 0.0])
+                            vel_along_normal = np.dot(vel, normal)
+                            vel = vel - 2 * vel_along_normal * normal
+                            vel *= BOUNCE
+
+                            vel_normal = np.dot(vel, normal)
+                            MIN_BOUNCE_SPEED = 3.5
+                            if abs(vel_normal) < MIN_BOUNCE_SPEED:
+                                if dist < ring_r:
+                                    vel -= normal * MIN_BOUNCE_SPEED
+                                else:
+                                    vel += normal * MIN_BOUNCE_SPEED
+
+                            if dist < ring_r:
+                                new_pos[:2] = normal[:2] * (ring_r - BALL_RADIUS - 0.1)
+                            else:
+                                new_pos[:2] = normal[:2] * (ring_r + BALL_RADIUS + 0.1)
+                            break
+
+            # Screen boundaries
+            if new_pos[1] < -3.5:
+                new_pos[1] = -3.5
+                vel[1] = abs(vel[1]) * BOUNCE
+            elif new_pos[1] > 3.5:
+                new_pos[1] = 3.5
+                vel[1] = -abs(vel[1]) * BOUNCE
+
+            if new_pos[0] < -6.5:
+                new_pos[0] = -6.5
+                vel[0] = abs(vel[0]) * BOUNCE
+            elif new_pos[0] > 6.5:
+                new_pos[0] = 6.5
+                vel[0] = -abs(vel[0]) * BOUNCE
+
+            speed = np.sqrt(vel[0]**2 + vel[1]**2)
+            if speed < MIN_VELOCITY and speed > 0.1:
+                scale = MIN_VELOCITY / speed
+                vel *= scale
+
+            pos = new_pos.copy()
+            ball_positions.append(pos.copy())
+
+        # Rendering
+        rings = VGroup()
+        rings_active = [True] * num_rings
+
+        for i in range(num_rings):
+            ring = self.create_ring_with_gap(ring_radii[i], gap_angles[i], gap_size)
+            ring.set_stroke(WHITE, width=3, opacity=0.9)
+            rings.add(ring)
+
+        scene.add(rings)
 
         # Ball
         ball = Dot(radius=BALL_RADIUS, color=YELLOW)
         ball.set_fill(YELLOW, opacity=1)
-        ball.move_to([0, 0, 0])
+        ball.move_to(ball_positions[0])
 
         # Trail
         trail = TracedPath(
@@ -736,205 +826,76 @@ class BouncingBallRings(BaseAnimation):
         )
         scene.add(trail, ball)
 
-        # Level system
-        current_level = 1
-        num_rings = 3
-        elapsed_time = 0.0
+        # Animation
+        destroyed_rings.sort()
 
-        while elapsed_time < self.duration:
-            # Generate rings for current level
-            ring_radii = [(1.2 + i * 0.7) * 1.3 for i in range(num_rings)]  # +30% СЂР°Р·РјРµСЂ
-            gap_angles = [random.uniform(0, TAU) for _ in range(num_rings)]
-            rotation_speeds = [random.choice([-0.6, 0.6]) for _ in range(num_rings)]
+        segment_time = 0.2
+        num_segments = int(self.duration / segment_time)
+        frames_per_segment = int(total_frames / num_segments)
 
-            # Create rings
-            rings = VGroup()
-            for i in range(num_rings):
-                ring = self.create_ring_with_gap(ring_radii[i], gap_angles[i], gap_size)
-                ring.set_stroke(WHITE, width=3, opacity=0.9)
-                rings.add(ring)
+        current_frame = 0
+        destroyed_dict = {frame: ring_idx for frame, ring_idx in destroyed_rings}
 
-            scene.add(rings)
+        for segment in range(num_segments):
+            start_frame = current_frame
+            end_frame = min(current_frame + frames_per_segment, total_frames)
 
-            # Show level indicator briefly
-            if current_level > 1:
-                level_text = Text(f"Level {current_level}", font_size=48, color=YELLOW)
-                scene.add(level_text)
-                scene.wait(0.5)
-                scene.play(FadeOut(level_text), run_time=0.3)
-                elapsed_time += 0.8
-
-            # Pre-calculate physics for this level
-            pos = np.array([0.0, 0.0, 0.0])
-            vel = np.array([random.uniform(-4, 4), 6.0, 0.0])
-
-            ball_positions = []
-            destroyed_rings = []
-            active_rings = set(range(num_rings))
-
-            max_level_frames = int((self.duration - elapsed_time) * fps)
-            frame = 0
-
-            # Physics simulation for this level
-            while len(active_rings) > 0 and frame < max_level_frames:
-                vel[1] -= GRAVITY * dt
-                new_pos = pos + vel * dt
-
-                dist = np.sqrt(new_pos[0]**2 + new_pos[1]**2)
-
-                if dist > 0.1:
-                    angle = np.arctan2(new_pos[1], new_pos[0]) % TAU
-
-                    for ring_idx in list(active_rings):
-                        ring_r = ring_radii[ring_idx]
-
-                        if abs(dist - ring_r) < BALL_RADIUS + 0.1:
-                            current_gap = (gap_angles[ring_idx] + rotation_speeds[ring_idx] * frame * dt) % TAU
-                            angle_diff = min(abs(angle - current_gap), TAU - abs(angle - current_gap))
-
-                            if angle_diff < gap_size / 2:
-                                destroyed_rings.append((frame, ring_idx))
-                                active_rings.remove(ring_idx)
-                                break
-                            else:
-                                normal = np.array([new_pos[0] / dist, new_pos[1] / dist, 0.0])
-                                vel_along_normal = np.dot(vel, normal)
-                                vel = vel - 2 * vel_along_normal * normal
-                                vel *= BOUNCE
-
-                                vel_normal = np.dot(vel, normal)
-                                MIN_BOUNCE_SPEED = 3.5
-                                if abs(vel_normal) < MIN_BOUNCE_SPEED:
-                                    if dist < ring_r:
-                                        vel -= normal * MIN_BOUNCE_SPEED
-                                    else:
-                                        vel += normal * MIN_BOUNCE_SPEED
-
-                                if dist < ring_r:
-                                    new_pos[:2] = normal[:2] * (ring_r - BALL_RADIUS - 0.1)
-                                else:
-                                    new_pos[:2] = normal[:2] * (ring_r + BALL_RADIUS + 0.1)
-                                break
-
-                # Screen boundaries
-                if new_pos[1] < -3.5:
-                    new_pos[1] = -3.5
-                    vel[1] = abs(vel[1]) * BOUNCE
-                elif new_pos[1] > 3.5:
-                    new_pos[1] = 3.5
-                    vel[1] = -abs(vel[1]) * BOUNCE
-
-                if new_pos[0] < -6.5:
-                    new_pos[0] = -6.5
-                    vel[0] = abs(vel[0]) * BOUNCE
-                elif new_pos[0] > 6.5:
-                    new_pos[0] = 6.5
-                    vel[0] = -abs(vel[0]) * BOUNCE
-
-                speed = np.sqrt(vel[0]**2 + vel[1]**2)
-                if speed < MIN_VELOCITY and speed > 0.1:
-                    scale = MIN_VELOCITY / speed
-                    vel *= scale
-
-                pos = new_pos.copy()
-                ball_positions.append(pos.copy())
-                frame += 1
-
-            # Render this level's animation
-            total_frames = len(ball_positions)
-            if total_frames == 0:
+            if end_frame <= start_frame:
                 break
 
-            rings_active = [True] * num_rings
-            destroyed_rings.sort()
-            destroyed_dict = {f: ring_idx for f, ring_idx in destroyed_rings}
+            segment_positions = ball_positions[start_frame:end_frame]
 
-            segment_time = 0.2
-            num_segments = max(1, int(total_frames * dt / segment_time))
-            frames_per_segment = max(1, total_frames // num_segments)
+            if len(segment_positions) < 2:
+                break
 
-            current_frame = 0
+            path = VMobject()
+            path.set_points_as_corners(segment_positions)
 
-            for segment in range(num_segments):
-                start_frame = current_frame
-                end_frame = min(current_frame + frames_per_segment, total_frames)
+            anims = [MoveAlongPath(ball, path, rate_func=linear)]
 
-                if end_frame <= start_frame or start_frame >= len(ball_positions):
-                    break
+            for ring_idx, ring in enumerate(rings):
+                if rings_active[ring_idx]:
+                    rotation = rotation_speeds[ring_idx] * segment_time
+                    anims.append(Rotate(ring, angle=rotation, rate_func=linear))
 
-                segment_positions = ball_positions[start_frame:end_frame]
+            scene.play(*anims, run_time=segment_time, rate_func=linear)
 
-                if len(segment_positions) < 2:
-                    break
-
-                path = VMobject()
-                path.set_points_as_corners(segment_positions)
-
-                anims = [MoveAlongPath(ball, path, rate_func=linear)]
-
-                for ring_idx, ring in enumerate(rings):
+            for frame in range(start_frame, end_frame):
+                if frame in destroyed_dict:
+                    ring_idx = destroyed_dict[frame]
                     if rings_active[ring_idx]:
-                        rotation = rotation_speeds[ring_idx] * segment_time
-                        anims.append(Rotate(ring, angle=rotation, rate_func=linear))
+                        ring = rings[ring_idx]
+                        ring_center = ring.get_center()
 
-                scene.play(*anims, run_time=segment_time, rate_func=linear)
-                elapsed_time += segment_time
+                        particles = VGroup()
+                        for i in range(12):
+                            angle = i * TAU / 12
+                            particle = Dot(radius=0.08, color=WHITE).move_to(ring_center)
+                            particles.add(particle)
 
-                for frame_check in range(start_frame, end_frame):
-                    if frame_check in destroyed_dict:
-                        ring_idx = destroyed_dict[frame_check]
-                        if rings_active[ring_idx]:
-                            ring = rings[ring_idx]
-                            ring_center = ring.get_center()
+                        scene.add(particles)
 
-                            particles = VGroup()
-                            for i in range(12):
-                                angle = i * TAU / 12
-                                particle = Dot(radius=0.08, color=WHITE).move_to(ring_center)
-                                particles.add(particle)
+                        particle_anims = []
+                        for i, particle in enumerate(particles):
+                            angle = i * TAU / 12
+                            direction = np.array([np.cos(angle), np.sin(angle), 0])
+                            target = ring_center + direction * 2.5
+                            particle_anims.extend([
+                                particle.animate.move_to(target),
+                                particle.animate.set_opacity(0)
+                            ])
 
-                            scene.add(particles)
+                        scene.play(
+                            ring.animate.scale(1.3).set_stroke(opacity=0),
+                            *particle_anims,
+                            run_time=0.3,
+                            rate_func=rush_from
+                        )
 
-                            particle_anims = []
-                            for i, particle in enumerate(particles):
-                                angle = i * TAU / 12
-                                direction = np.array([np.cos(angle), np.sin(angle), 0])
-                                target = ring_center + direction * 2.5
-                                particle_anims.extend([
-                                    particle.animate.move_to(target),
-                                    particle.animate.set_opacity(0)
-                                ])
+                        scene.remove(particles)
+                        rings_active[ring_idx] = False
 
-                            scene.play(
-                                ring.animate.scale(1.3).set_stroke(opacity=0),
-                                *particle_anims,
-                                run_time=0.3,
-                                rate_func=rush_from
-                            )
-                            elapsed_time += 0.3
-
-                            scene.remove(particles)
-                            rings_active[ring_idx] = False
-
-                current_frame = end_frame
-
-                if elapsed_time >= self.duration:
-                    break
-
-            # Clean up current level rings
-            scene.remove(rings)
-
-            # Check if we should continue to next level
-            if elapsed_time >= self.duration:
-                break
-
-            # Next level: add one more ring
-            num_rings += 1
-            current_level += 1
-
-            # Reset ball to center for next level
-            scene.play(ball.animate.move_to([0, 0, 0]), run_time=0.5)
-            elapsed_time += 0.5
+            current_frame = end_frame
 
     def create_ring_with_gap(self, radius: float, gap_angle: float, gap_size: float = 0.6):
         arc = Arc(
@@ -1053,27 +1014,28 @@ class AnimationGenerator:
         return [
             {
                 "type": "bouncing_ball_rings",
-                "name": "РџСЂС‹РіР°СЋС‰РёР№ С€Р°СЂРёРє СЃ РєРѕР»СЊС†Р°РјРё",
-                "description": "РЁР°СЂРёРє РїСЂС‹РіР°РµС‚ РІРЅСѓС‚СЂРё РІСЂР°С‰Р°СЋС‰РёС…СЃСЏ РєРѕР»РµС† СЃ С„РёР·РёРєРѕР№"
+                "name": "Прыгающий шарик с кольцами",
+                "description": "Шарик прыгает внутри вращающихся колец с физикой"
             },
             {
                 "type": "freezing_balls",
-                "name": "Р—Р°РјРµСЂР·Р°СЋС‰РёРµ С€Р°СЂРёРєРё СЃ РєРѕРЅС„РµС‚С‚Рё",
-                "description": "РЁР°СЂС‹ РїР°РґР°СЋС‚ РІ РєРѕР»СЊС†Рѕ, Р·Р°СЃС‚С‹РІР°СЋС‚, РѕРґРёРЅ РІС‹Р»РµС‚Р°РµС‚ СЃ С„РµР№РµСЂРІРµСЂРєРѕРј"
+                "name": "Замерзающие шарики с конфетти",
+                "description": "Шары падают в кольцо, застывают, один вылетает с фейерверком"
             },
             {
                 "type": "orbit_escape_ball",
-                "name": "РЁР°СЂРёРє СЃ РѕСЂР±РёС‚Р°РјРё Рё РІС‹СЂС‹РІР°РјРё",
-                "description": "РЁР°СЂРёРє РѕСЂР±РёС‚РёСЂСѓРµС‚ РІРѕРєСЂСѓРі РєРѕР»РµС† Рё РїРµСЂРёРѕРґРёС‡РµСЃРєРё РІС‹СЂС‹РІР°РµС‚СЃСЏ"
+                "name": "Шарик с орбитами и вырывами",
+                "description": "Шарик орбитирует вокруг колец и периодически вырывается"
             },
             {
                 "type": "multi_orbit_balls",
-                "name": "РњРЅРѕР¶РµСЃС‚РІРѕ РѕСЂР±РёС‚РёСЂСѓСЋС‰РёС… С€Р°СЂРёРєРѕРІ",
-                "description": "РќРµСЃРєРѕР»СЊРєРѕ СЂР°Р·РЅРѕС†РІРµС‚РЅС‹С… С€Р°СЂРёРєРѕРІ РѕСЂР±РёС‚РёСЂСѓСЋС‚ РјРµР¶РґСѓ РєРѕР»СЊС†Р°РјРё"
+                "name": "Множество орбитирующих шариков",
+                "description": "Несколько разноцветных шариков орбитируют между кольцами"
             },
             {
                 "type": "pulsating_rings",
-                "name": "РџСѓР»СЊСЃРёСЂСѓСЋС‰РёРµ РєРѕР»СЊС†Р°",
-                "description": "Р¦РµРЅС‚СЂР°Р»СЊРЅС‹Р№ С€Р°СЂРёРє РѕРєСЂСѓР¶РµРЅ РїСѓР»СЊСЃРёСЂСѓСЋС‰РёРјРё С†РІРµС‚РЅС‹РјРё РєРѕР»СЊС†Р°РјРё"
+                "name": "Пульсирующие кольца",
+                "description": "Центральный шарик окружен пульсирующими цветными кольцами"
             }
         ]
+

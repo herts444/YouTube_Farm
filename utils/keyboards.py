@@ -74,7 +74,8 @@ BTN_THEME_REDDIT = "🧵 Reddit"
 
 # Кнопки для упрощенного флоу создания видео
 BTN_SIMPLE_CUTS = "✂️ Нарезки"
-BTN_SIMPLE_REDDIT = "📱 Reddit Story"
+BTN_SIMPLE_REDDIT = "📱 Жизненные истории"
+BTN_SIMPLE_EDUCATIONAL = "🧠 Познавательные истории"
 BTN_SIMPLE_ANIMATION = "🎨 Только анимация"
 
 # Кнопки для языков реддит стори
@@ -400,14 +401,14 @@ def simple_theme_select_kb() -> ReplyKeyboardMarkup:
     kb = [
         [KeyboardButton(text=BTN_SIMPLE_CUTS)],
         [KeyboardButton(text=BTN_SIMPLE_REDDIT)],
-        [KeyboardButton(text=BTN_SIMPLE_ANIMATION)],
+        [KeyboardButton(text=BTN_SIMPLE_EDUCATIONAL)],
         [KeyboardButton(text=BTN_BACK)],
     ]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
 
 
 def simple_language_kb() -> ReplyKeyboardMarkup:
-    """Выбор языка для реддит стори"""
+    """Выбор языка для реддит стори (deprecated - используйте simple_language_inline_kb)"""
     kb = [
         [KeyboardButton(text=BTN_LANG_RU), KeyboardButton(text=BTN_LANG_EN)],
         [KeyboardButton(text=BTN_BACK)],
@@ -415,8 +416,19 @@ def simple_language_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
 
 
+def simple_language_inline_kb() -> InlineKeyboardMarkup:
+    """Inline выбор языка для историй"""
+    buttons = [
+        [InlineKeyboardButton(text="🇷🇺 Русский", callback_data="lang:ru")],
+        [InlineKeyboardButton(text="🇬🇧 English", callback_data="lang:en")],
+        [InlineKeyboardButton(text="🇫🇷 Français", callback_data="lang:fr")],
+        [InlineKeyboardButton(text="❌ Отменить", callback_data="lang:cancel")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
 def simple_reddit_format_kb() -> ReplyKeyboardMarkup:
-    """Выбор формата реддит стори"""
+    """Выбор формата реддит стори (deprecated - используйте simple_reddit_format_inline_kb)"""
     kb = [
         [KeyboardButton(text=BTN_FORMAT_TOP_VIDEO)],
         [KeyboardButton(text=BTN_FORMAT_CENTER)],
@@ -424,6 +436,15 @@ def simple_reddit_format_kb() -> ReplyKeyboardMarkup:
         [KeyboardButton(text=BTN_BACK)],
     ]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
+
+
+def simple_reddit_format_inline_kb() -> InlineKeyboardMarkup:
+    """Inline выбор формата - только анимация с орбитами"""
+    buttons = [
+        [InlineKeyboardButton(text="⭕ Анимация (шарик с орбитами)", callback_data="format:animation")],
+        [InlineKeyboardButton(text="❌ Отменить", callback_data="format:cancel")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def voice_test_navigation_kb() -> ReplyKeyboardMarkup:

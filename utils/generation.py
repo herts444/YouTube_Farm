@@ -154,16 +154,74 @@ async def _resolve_channel(channel: Union[Dict[str, Any], str, int]) -> Dict[str
 
 
 async def _generate_reddit(ch: Dict[str, Any], out_dir: str) -> Dict[str, str]:
-    """Генерация Reddit истории"""
-    # 1) Сценарий + PNG-кадры карточки
-    story = await reddit_generate(ch, out_dir)
+    """Генерация Reddit истории с синхронизацией текста и аудио"""
+    # 1) Генерируем только текст (БЕЗ рендеринга кадров)
+    from utils.story_gen import generate_story as _llm_generate
 
-    # 2) Получаем параметры фона
-    dur = max(1.0, float(story["duration_sec"]))
+    lang = _norm_str(ch.get("tts_lang") or "en").lower()
+    target_sec = int(ch.get("reddit_target_sec") or 75)
+    preset = _norm_str(ch.get("prompt_preset") or "default")
+
+    # Получаем промпт из БД
+    prompt = None
+    try:
+        from db.database import db
+        doc = await db().prompts.find_one({"scope": "reddit", "preset": preset, "lang": lang})
+        if doc and doc.get("text"):
+            prompt = doc["text"]
+    except Exception:
+        pass
+
+    # Генерируем текст истории
+    text = await _llm_generate(prompt, preset, lang, target_sec=target_sec)
+    parts = (text or "Untitled\n\n").split("\n", 1)
+    title = parts[0].strip() or "Untitled"
+    body = (parts[1] if len(parts) > 1 else "").strip()
+    tts_text = f"{title}. {body}"
+
+    # 2) Генерируем TTS СРАЗУ, чтобы получить реальную длительность
+    tts_voice = ch.get("tts_voice")
+    tts_speed = float(ch.get("tts_speed") or 1.3)
+
+    audio_path = os.path.join(out_dir, "voice.mp3")
+    await synthesize_tts(
+        text=tts_text,
+        out_path=audio_path,
+        voice=tts_voice,
+        lang=lang,
+        speed=tts_speed,
+    )
+
+    # Получаем РЕАЛЬНУЮ длительность аудио
+    real_dur = await probe_duration(audio_path)
+    dur = max(1.0, real_dur)
+
+    # 3) ТЕПЕРЬ рендерим кадры с РЕАЛЬНОЙ длительностью аудио для синхронизации
+    from utils.engines.RedditStory import render_reddit_frames
+
+    frames_dir = os.path.join(out_dir, "frames")
+    fps = int(ch.get("fps") or 30)
+    theme_cfg = {
+        "subreddit": ch.get("reddit_subreddit") or "r/AskReddit",
+        "meta": ch.get("reddit_meta") or "↑ 12.3k • 6 hours ago",
+        "pad": 24,
+    }
+
+    render_reddit_frames(
+        out_dir=frames_dir,
+        raw_title=title,
+        raw_body=body,
+        fps=fps,
+        duration=dur,  # Используем РЕАЛЬНУЮ длительность аудио!
+        theme_cfg=theme_cfg,
+        canvas=(1080, 960),  # Нижняя половина экрана - карточка не на весь экран!
+    )
+
+    # 4) Получаем параметры фона
     background_type = _norm_str(ch.get("background_type") or "video").lower()
     card_position = _norm_str(ch.get("reddit_card_position") or "center").lower()
 
-    # 3) Генерируем или выбираем фон
+    # 5) Генерируем или выбираем фон
     if background_type == "animation":
         # Генерируем анимацию
         from utils.animations import AnimationGenerator
@@ -194,37 +252,24 @@ async def _generate_reddit(ch: Dict[str, Any], out_dir: str) -> Dict[str, str]:
             scope="reddit"  # берет из БД в первую очередь
         )
 
-    # 4) Композиция видеоряда (без аудио)
+    # 6) Композиция видеоряда (без аудио)
     composed_video = await reddit_compose(
-        frames_dir=story["frames_dir"],
+        frames_dir=frames_dir,
         bg_video_path=bg_clip,
         duration=dur,
-        fps=int(ch.get("fps") or 30),
+        fps=fps,
         out_dir=out_dir,
         background_type=background_type,
         card_position=card_position,
     )
 
-    # 5) TTS + (опц.) сабы + финальный mux
-    tts_lang = _norm_str(ch.get("tts_lang") or "en").lower()
-    tts_voice = ch.get("tts_voice")
-    tts_speed = float(ch.get("tts_speed") or 1.1)
+    # 7) Субтитры (опционально) + финальный mux
     subs_lang = _norm_str(ch.get("subs_lang") or "") or None
-
-    audio_path = os.path.join(out_dir, "voice.mp3")
-    await synthesize_tts(
-        text=story["tts_text"],
-        out_path=audio_path,
-        voice=tts_voice,
-        lang=tts_lang,
-        speed=tts_speed,
-    )
-    real_dur = max(await probe_duration(audio_path), dur)
 
     srt_path = None
     if subs_lang:
         srt_path = os.path.join(out_dir, "subs.srt")
-        build_srt_by_text_length(text=story["tts_text"], total_duration=real_dur, out_path=srt_path)
+        build_srt_by_text_length(text=tts_text, total_duration=dur, out_path=srt_path)
 
     final_path = os.path.join(out_dir, "final.mp4")
     await mux_av_with_optional_subs(
@@ -232,7 +277,7 @@ async def _generate_reddit(ch: Dict[str, Any], out_dir: str) -> Dict[str, str]:
         audio_path=audio_path,
         srt_path=srt_path,
         out_path=final_path,
-        metadata={"title": story["title"]},
+        metadata={"title": title},
     )
 
     # Обновляем счетчик генераций
@@ -247,7 +292,7 @@ async def _generate_reddit(ch: Dict[str, Any], out_dir: str) -> Dict[str, str]:
 
     return {
         "video_path": final_path,
-        "text": f'{story["title"]}\n\n{story["body"]}',
+        "text": f'{title}\n\n{body}',
         "is_reddit": "1",
     }
 
@@ -455,7 +500,7 @@ async def _generate_animation_only(ch: Dict[str, Any], out_dir: str) -> Dict[str
 
     # 4) Генерируем TTS
     tts_voice = ch.get("tts_voice")
-    tts_speed = float(ch.get("tts_speed") or 1.1)
+    tts_speed = float(ch.get("tts_speed") or 1.3)  # Ускорено на ~20%
 
     audio_path = os.path.join(out_dir, "voice.mp3")
     await synthesize_tts(
