@@ -72,9 +72,9 @@ class OrbitEscapeBall(BaseAnimation):
             stars.add(star)
         scene.add(stars)
 
-        # Rings
+        # Rings (увеличены на 20%)
         num_rings = 4
-        ring_radii = [0.8, 1.6, 2.4, 3.2]
+        ring_radii = [0.96, 1.92, 2.88, 3.84]
         rings = VGroup()
 
         for i, radius in enumerate(ring_radii):
@@ -170,9 +170,9 @@ class MultiOrbitBalls(BaseAnimation):
         )
         scene.add(background)
 
-        # Concentric rings
+        # Concentric rings (увеличены на 20%)
         num_rings = 5
-        ring_radii = [0.6, 1.2, 1.8, 2.4, 3.0]
+        ring_radii = [0.72, 1.44, 2.16, 2.88, 3.6]
         rings = VGroup()
 
         for radius in ring_radii:
@@ -275,7 +275,7 @@ class PulsatingRings(BaseAnimation):
 
         for i in range(num_rings):
             ring = Circle(
-                radius=(i + 1) * 0.5,
+                radius=(i + 1) * 0.6,  # Увеличено на 20%
                 color=base_colors[i],
                 stroke_width=3,
                 stroke_opacity=0.7
@@ -392,8 +392,8 @@ class FreezingBalls(BaseAnimation):
     def _run_single_cycle(self, scene: Scene) -> float:
         """Run a single cycle of the freezing balls animation. Returns cycle duration."""
 
-        # Ring with gap at top
-        ring_radius = 3.0
+        # Ring with gap at top (увеличен на 20%)
+        ring_radius = 3.6
         gap_size = 0.8
         gap_angle = PI / 2  # Top
 
@@ -763,7 +763,7 @@ class BouncingBallRings(BaseAnimation):
 
         while elapsed_time < self.duration:
             # Generate rings for current level
-            ring_radii = [(1.2 + i * 0.7) * 1.3 for i in range(num_rings)]  # +30% размер
+            ring_radii = [(1.2 + i * 0.7) * 1.56 for i in range(num_rings)]  # +56% размер (1.3 * 1.2)
             gap_angles = [random.uniform(0, TAU) for _ in range(num_rings)]
             rotation_speeds = [random.choice([-0.6, 0.6]) for _ in range(num_rings)]
 
