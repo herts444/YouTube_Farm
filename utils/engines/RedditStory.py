@@ -124,9 +124,11 @@ def _draw_reddit_card(base: Image.Image, W: int, H: int,
     draw = ImageDraw.Draw(base, "RGBA")
     
     pad = int(theme_cfg.get("pad", 24))
-    card_w = W - pad * 2
+    # Ширина карточки - 60% от canvas (отступы по 20% слева и справа)
+    card_w = int(W * 0.6)
     card_h = int(H * 0.86)
-    card_x = pad
+    # Позиция карточки - 20% от левого края
+    card_x = int(W * 0.2)
     card_y = max(0, int((H - card_h) // 2))
     
     draw.rounded_rectangle((card_x, card_y, card_x + card_w, card_y + card_h), 
@@ -255,8 +257,8 @@ def _split_text_into_pages(text: str, W: int, H: int, title: str, theme_cfg: dic
     temp_img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     draw = ImageDraw.Draw(temp_img, "RGBA")
 
-    pad = int(theme_cfg.get("pad", 24))
-    card_w = W - pad * 2
+    # Ширина карточки - 60% от canvas (отступы по 20% слева и справа)
+    card_w = int(W * 0.6)
     card_h = int(H * 0.86)
 
     f_title = _load_font(56 if H <= 960 else 64)
